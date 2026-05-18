@@ -15,24 +15,66 @@ Traceback (most recent call last):
     raise CellExecutionError.from_cell_and_msg(cell, exec_reply_content)
 nbclient.exceptions.CellExecutionError: An error occurred while executing the following cell:
 ------------------
-df_resultados = pd.DataFrame(resultados)
-df_resultados["Brecha F1"] = (df_resultados["F1 CV"] - df_resultados["Test F1"]).round(4)
-df_resultados = df_resultados.sort_values(["Modelo", "Brecha F1"]).reset_index(drop=True)
 
-(df_resultados.style
-    .background_gradient(subset=["Brecha F1"], cmap="RdYlGn_r")
-    .background_gradient(subset=["Test F1"], cmap="RdYlGn")
-    .background_gradient(subset=["PR AUC CV"], cmap="RdYlGn")
-)
+# librerías
+from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+import time
+import faiss
+from sklearn.model_selection import StratifiedShuffleSplit 
+from sklearn.model_selection import cross_validate
+import warnings
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report, roc_auc_score, average_precision_score
+warnings.filterwarnings('ignore')
+from sklearn.base import clone, BaseEstimator, ClassifierMixin
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier 
+from xgboost import XGBClassifier
+from sklearn.utils import resample
+
+from imblearn.under_sampling import RandomUnderSampler
+from scipy.stats import ks_2samp
+import pickle
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import GaussianNB  
+from xgboost import XGBClassifier
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.svm import LinearSVC
+from sklearn.linear_model import SGDClassifier
+from sklearn import metrics
+from sklearn.metrics import roc_curve
+import random
+from sklearn.svm import SVC
+import matplotlib.pyplot as plt
+import joblib
+from lime.lime_tabular import LimeTabularExplainer
+import ctypes
+from scipy.stats import randint
+from sklearn.model_selection import RandomizedSearchCV
+import optuna
+from optuna.samplers import TPESampler
+from sklearn.model_selection import cross_val_score
+from sklearn.neighbors import KNeighborsClassifier
+
+# para desbalanceo
+from imblearn.pipeline import Pipeline as ImbPipeline  # para cuando uses SMOTE/ADASYN
+from sklearn.pipeline import Pipeline  
+from imblearn.over_sampling import SMOTE, ADASYN
+from sklearn.base import clone
+
+
+RANDOM_STATE = 42
 ------------------
 
 
 [1;31m---------------------------------------------------------------------------[0m
-[1;31mNameError[0m                                 Traceback (most recent call last)
-Cell [1;32mIn[12], line 1[0m
-[1;32m----> 1[0m df_resultados [38;5;241m=[39m pd[38;5;241m.[39mDataFrame([43mresultados[49m)
-[0;32m      2[0m df_resultados[[38;5;124m"[39m[38;5;124mBrecha F1[39m[38;5;124m"[39m] [38;5;241m=[39m (df_resultados[[38;5;124m"[39m[38;5;124mF1 CV[39m[38;5;124m"[39m] [38;5;241m-[39m df_resultados[[38;5;124m"[39m[38;5;124mTest F1[39m[38;5;124m"[39m])[38;5;241m.[39mround([38;5;241m4[39m)
-[0;32m      3[0m df_resultados [38;5;241m=[39m df_resultados[38;5;241m.[39msort_values([[38;5;124m"[39m[38;5;124mModelo[39m[38;5;124m"[39m, [38;5;124m"[39m[38;5;124mBrecha F1[39m[38;5;124m"[39m])[38;5;241m.[39mreset_index(drop[38;5;241m=[39m[38;5;28;01mTrue[39;00m)
+[1;31mModuleNotFoundError[0m                       Traceback (most recent call last)
+Cell [1;32mIn[4], line 5[0m
+[0;32m      3[0m [38;5;28;01mfrom[39;00m [38;5;21;01msklearn[39;00m[38;5;21;01m.[39;00m[38;5;21;01mpreprocessing[39;00m [38;5;28;01mimport[39;00m StandardScaler
+[0;32m      4[0m [38;5;28;01mimport[39;00m [38;5;21;01mtime[39;00m
+[1;32m----> 5[0m [38;5;28;01mimport[39;00m [38;5;21;01mfaiss[39;00m
+[0;32m      6[0m [38;5;28;01mfrom[39;00m [38;5;21;01msklearn[39;00m[38;5;21;01m.[39;00m[38;5;21;01mmodel_selection[39;00m [38;5;28;01mimport[39;00m StratifiedShuffleSplit 
+[0;32m      7[0m [38;5;28;01mfrom[39;00m [38;5;21;01msklearn[39;00m[38;5;21;01m.[39;00m[38;5;21;01mmodel_selection[39;00m [38;5;28;01mimport[39;00m cross_validate
 
-[1;31mNameError[0m: name 'resultados' is not defined
+[1;31mModuleNotFoundError[0m: No module named 'faiss'
 
