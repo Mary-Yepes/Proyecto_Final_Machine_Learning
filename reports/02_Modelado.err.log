@@ -15,66 +15,152 @@ Traceback (most recent call last):
     raise CellExecutionError.from_cell_and_msg(cell, exec_reply_content)
 nbclient.exceptions.CellExecutionError: An error occurred while executing the following cell:
 ------------------
+from sklearn.model_selection import train_test_split
 
-# librerías
-from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
-from sklearn.preprocessing import StandardScaler
-import time
-import faiss
-from sklearn.model_selection import StratifiedShuffleSplit 
-from sklearn.model_selection import cross_validate
-import warnings
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report, roc_auc_score, average_precision_score
-warnings.filterwarnings('ignore')
-from sklearn.base import clone, BaseEstimator, ClassifierMixin
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier 
-from xgboost import XGBClassifier
-from sklearn.utils import resample
+# ── división limpia: train_loop / val / test ──────────────────────────────────
+# X_train e y_train ya existen (el test set original no se toca)
+X_train_loop, X_val, y_train_loop, y_val = train_test_split(
+    X_train, y_train,
+    test_size=0.2,
+    stratify=y_train,
+    random_state=RANDOM_STATE
+)
 
-from imblearn.under_sampling import RandomUnderSampler
-from scipy.stats import ks_2samp
-import pickle
-from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import GaussianNB  
-from xgboost import XGBClassifier
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.svm import LinearSVC
-from sklearn.linear_model import SGDClassifier
-from sklearn import metrics
-from sklearn.metrics import roc_curve
-import random
-from sklearn.svm import SVC
-import matplotlib.pyplot as plt
-import joblib
-from lime.lime_tabular import LimeTabularExplainer
-import ctypes
-from scipy.stats import randint
-from sklearn.model_selection import RandomizedSearchCV
-import optuna
-from optuna.samplers import TPESampler
-from sklearn.model_selection import cross_val_score
-from sklearn.neighbors import KNeighborsClassifier
+# reconstruir mayoría y minoría solo sobre train_loop
+df_train_loop = pd.DataFrame(X_train_loop)
+df_train_loop["Class"] = y_train_loop.values if isinstance(y_train_loop, pd.Series) else y_train_loop
 
-# para desbalanceo
-from imblearn.pipeline import Pipeline as ImbPipeline  # para cuando uses SMOTE/ADASYN
-from sklearn.pipeline import Pipeline  
-from imblearn.over_sampling import SMOTE, ADASYN
-from sklearn.base import clone
+df_mayoria  = df_train_loop[df_train_loop["Class"] == 0]
+df_minoria  = df_train_loop[df_train_loop["Class"] == 1]
 
+radios_knn = [10, 20, 30, 50, 70, 100, 120, 150, 200, 300, 400, 500]
+resultados = []
 
-RANDOM_STATE = 42
+for nombre, modelo in modelos_muestra.items():
+    if nombre == "KNN":
+        radios = radios_knn
+
+    for radio in radios:
+        n_samples_mayoria = len(df_minoria) * radio
+        
+        # si el radio pide más muestras de las disponibles, saltar
+        if n_samples_mayoria > len(df_mayoria):
+            print(f"  ⚠ {nombre} - Ratio 1:{radio} omitido (no hay suficientes muestras)")
+            continue
+
+        df_mayoria_undersample = resample(
+            df_mayoria,
+            replace=False,
+            n_samples=n_samples_mayoria,
+            random_state=RANDOM_STATE
+        )
+
+        train_muestra = pd.concat([df_mayoria_undersample, df_minoria])
+        train_muestra = train_muestra.sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
+
+        X_muestra_train = train_muestra.drop(columns=["Class"])
+        y_muestra_train = train_muestra["Class"]
+
+        preprocesador_muestra = construir_preprocesador(escalado=True)
+        pipeline_muestra = Pipeline([
+            ("preprocesador", preprocesador_muestra),
+            ("modelo", clone(modelo))
+        ])
+
+        print(f"\n===== {nombre} - Ratio 1:{radio} =====")
+        print(f"Tamaño muestra: {len(train_muestra)} | No fraude: {len(df_mayoria_undersample)} | Fraude: {len(df_minoria)}")
+
+        # ── CV sobre train_loop ───────────────────────────────────────────────
+        cv_scores = cross_validate(
+            pipeline_muestra,
+            X_muestra_train,
+            y_muestra_train,
+            cv=5,
+            scoring={
+                "f1":        "f1",
+                "recall":    "recall",
+                "precision": "precision",
+                "pr_auc":    "average_precision"
+            },
+            n_jobs=-1
+        )
+
+        # ── evaluación en validación (no en test) ─────────────────────────────
+        pipeline_muestra.fit(X_muestra_train, y_muestra_train)
+        y_val_pred = pipeline_muestra.predict(X_val)
+        y_val_prob = pipeline_muestra.predict_proba(X_val)[:, 1]
+
+        resultados.append({
+            "Modelo":       nombre,
+            "Ratio":        radio,
+            "F1 CV":        np.mean(cv_scores["test_f1"]),
+            "Recall CV":    np.mean(cv_scores["test_recall"]),
+            "Precision CV": np.mean(cv_scores["test_precision"]),
+            "PR AUC CV":    np.mean(cv_scores["test_pr_auc"]),
+            "F1 Val":       f1_score(y_val, y_val_pred, zero_division=0),
+            "Recall Val":   recall_score(y_val, y_val_pred, zero_division=0),
+            "Precision Val":precision_score(y_val, y_val_pred, zero_division=0),
+            "PR AUC Val":   average_precision_score(y_val, y_val_prob),
+        })
+
+# ── selección del mejor ratio por modelo (según PR AUC Val) ──────────────────
+df_resultados = pd.DataFrame(resultados)
+mejores = df_resultados.loc[df_resultados.groupby("Modelo")["PR AUC Val"].idxmax()]
+
+print("\n===== Mejores ratios por modelo (según PR AUC Val) =====")
+print(mejores[["Modelo", "Ratio", "F1 CV", "PR AUC CV", "F1 Val", "PR AUC Val"]])
+
+# ── evaluación final en test (una sola vez por modelo) ───────────────────────
+for _, row in mejores.iterrows():
+    nombre      = row["Modelo"]
+    mejor_radio = int(row["Ratio"])
+    modelo      = modelos_muestra[nombre]
+
+    n_samples_mayoria = len(df_minoria) * mejor_radio
+    df_mayoria_undersample = resample(
+        df_mayoria,
+        replace=False,
+        n_samples=n_samples_mayoria,
+        random_state=RANDOM_STATE
+    )
+
+    train_muestra = pd.concat([df_mayoria_undersample, df_minoria])
+    train_muestra = train_muestra.sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
+
+    X_muestra_train = train_muestra.drop(columns=["Class"])
+    y_muestra_train = train_muestra["Class"]
+
+    preprocesador_muestra = construir_preprocesador(escalado=True)
+    pipeline_final = Pipeline([
+        ("preprocesador", preprocesador_muestra),
+        ("modelo", clone(modelo))
+    ])
+
+    # entrenamos con train_loop completo (muestra con mejor ratio)
+    pipeline_final.fit(X_muestra_train, y_muestra_train)
+
+    y_test_pred = pipeline_final.predict(X_test)
+    y_test_prob = pipeline_final.predict_proba(X_test)[:, 1]
+
+    print(f"\n{'='*60}")
+    print(f"  {nombre} — Ratio 1:{mejor_radio} — Evaluación final en Test")
+    print(f"{'='*60}")
+    print(f"  F1        : {f1_score(y_test, y_test_pred, zero_division=0):.4f}")
+    print(f"  Recall    : {recall_score(y_test, y_test_pred, zero_division=0):.4f}")
+    print(f"  Precision : {precision_score(y_test, y_test_pred, zero_division=0):.4f}")
+    print(f"  PR AUC    : {average_precision_score(y_test, y_test_prob):.4f}")
+    print(classification_report(y_test, y_test_pred, zero_division=0))
 ------------------
 
 
 [1;31m---------------------------------------------------------------------------[0m
-[1;31mModuleNotFoundError[0m                       Traceback (most recent call last)
-Cell [1;32mIn[4], line 5[0m
-[0;32m      3[0m [38;5;28;01mfrom[39;00m [38;5;21;01msklearn[39;00m[38;5;21;01m.[39;00m[38;5;21;01mpreprocessing[39;00m [38;5;28;01mimport[39;00m StandardScaler
-[0;32m      4[0m [38;5;28;01mimport[39;00m [38;5;21;01mtime[39;00m
-[1;32m----> 5[0m [38;5;28;01mimport[39;00m [38;5;21;01mfaiss[39;00m
-[0;32m      6[0m [38;5;28;01mfrom[39;00m [38;5;21;01msklearn[39;00m[38;5;21;01m.[39;00m[38;5;21;01mmodel_selection[39;00m [38;5;28;01mimport[39;00m StratifiedShuffleSplit 
-[0;32m      7[0m [38;5;28;01mfrom[39;00m [38;5;21;01msklearn[39;00m[38;5;21;01m.[39;00m[38;5;21;01mmodel_selection[39;00m [38;5;28;01mimport[39;00m cross_validate
+[1;31mNameError[0m                                 Traceback (most recent call last)
+Cell [1;32mIn[12], line 26[0m
+[0;32m     23[0m [38;5;28;01mif[39;00m nombre [38;5;241m==[39m [38;5;124m"[39m[38;5;124mKNN[39m[38;5;124m"[39m:
+[0;32m     24[0m     radios [38;5;241m=[39m radios_knn
+[1;32m---> 26[0m [38;5;28;01mfor[39;00m radio [38;5;129;01min[39;00m [43mradios[49m:
+[0;32m     27[0m     n_samples_mayoria [38;5;241m=[39m [38;5;28mlen[39m(df_minoria) [38;5;241m*[39m radio
+[0;32m     29[0m     [38;5;66;03m# si el radio pide más muestras de las disponibles, saltar[39;00m
 
-[1;31mModuleNotFoundError[0m: No module named 'faiss'
+[1;31mNameError[0m: name 'radios' is not defined
 
